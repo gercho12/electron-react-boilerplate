@@ -14,6 +14,7 @@ import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
 import MenuBuilder from './menu';
 import { resolveHtmlPath } from './util';
+import { fork } from 'child_process'; // Import fork to run the backend server
 
 class AppUpdater {
   constructor() {
@@ -24,6 +25,7 @@ class AppUpdater {
 }
 
 let mainWindow: BrowserWindow | null = null;
+let backendProcess: any = null;
 
 ipcMain.on('ipc-example', async (event, arg) => {
   const msgTemplate = (pingPong: string) => `IPC test: ${pingPong}`;
@@ -40,7 +42,7 @@ const isDebug =
   process.env.NODE_ENV === 'development' || process.env.DEBUG_PROD === 'true';
 
 if (isDebug) {
-  require('electron-debug')();
+  // require('electron-debug')(); // Commenting out to prevent DevTools from opening
 }
 
 const installExtensions = async () => {
@@ -81,7 +83,15 @@ const createWindow = async () => {
     },
   });
 
-  mainWindow.loadURL(resolveHtmlPath('index.html'));
+  // Inicia el servidor backend
+  const backendPath = app.isPackaged
+    ? path.join(__dirname, '../backend/index.js')
+    : path.join(__dirname, '../../src/renderer/backend/index.js');
+    
+  backendProcess = fork(backendPath);
+
+    mainWindow.loadURL(resolveHtmlPath('index.html'));
+    mainWindow.maximize(); // Maximize the window on startup
 
   mainWindow.on('ready-to-show', () => {
     if (!mainWindow) {
@@ -117,6 +127,9 @@ const createWindow = async () => {
  */
 
 app.on('window-all-closed', () => {
+  if (backendProcess) {
+    backendProcess.kill();
+  }
   // Respect the OSX convention of having the application in memory even
   // after all windows have been closed
   if (process.platform !== 'darwin') {
@@ -124,13 +137,10 @@ app.on('window-all-closed', () => {
   }
 });
 
-app
-  .whenReady()
+app.whenReady()
   .then(() => {
     createWindow();
     app.on('activate', () => {
-      // On macOS it's common to re-create a window in the app when the
-      // dock icon is clicked and there are no other windows open.
       if (mainWindow === null) createWindow();
     });
   })
